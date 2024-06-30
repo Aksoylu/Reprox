@@ -1,61 +1,57 @@
+use rustls::server::ResolvesServerCertUsingSni;
+use rustls::sign::{CertifiedKey, RsaSigningKey};
 use rustls::{Certificate, PrivateKey};
-use tokio_rustls::rustls::{self, ServerConfig};
 use rustls_pemfile::{certs, pkcs8_private_keys};
-use tokio_rustls::TlsAcceptor; // Import for handling PEM files
+use tokio_rustls::rustls::{self, ServerConfig};
+use tokio_rustls::TlsAcceptor;
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::sync::Arc;
 
-use crate::core::models::SslPath;
+use crate::core::models::HttpsRoute;
 
+pub async fn create_ssl_context(routes: HashMap<std::string::String, HttpsRoute>) -> TlsAcceptor {
+    let mut sni_resolver = ResolvesServerCertUsingSni::new();
 
-pub fn create_ssl_context(optional_ssl_path:Option<SslPath>) -> TlsAcceptor{
-    if optional_ssl_path.is_some() == false {
-        eprintln!("Error: Https protocol needs SSL certificate and private key of it");
+    for (source, https_route) in routes {
+        let ssl_path = https_route.ssl_path;
+        let certs = load_certs(ssl_path.cert.as_str()).await.unwrap();
+        let key = load_private_key(ssl_path.private_key.as_str())
+            .await
+            .unwrap();
+        let certified_key = create_certified_key(certs, key);
+        sni_resolver.add(source.as_str(), certified_key).unwrap();
     }
 
-    let ssl_path = optional_ssl_path.unwrap();
+    let tls_config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(sni_resolver));
 
+    let ssl_context = TlsAcceptor::from(Arc::new(tls_config));
 
-    match (load_certs(&ssl_path.cert), load_private_key(&ssl_path.private_key)) {
-        (Ok(certs), Ok(key)) => {
-            let tls_config = configure_tls(certs, key).unwrap();
-            let tls_context = TlsAcceptor::from(Arc::new(tls_config));
-            
-            tls_context
-        }
-        (Err(e), _) | (_, Err(e)) => {
-            panic!("Failed to load certificates or private key on path:\n{}\n{}", ssl_path.cert, ssl_path.private_key);
-        }
-    }
-} 
-
-
-pub fn load_certs(filename: &str) -> io::Result<Vec<Certificate>> {
-    let certfile = File::open(filename)?;
-    let mut reader = BufReader::new(certfile);
-    let certs = certs(&mut reader)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))?
-        .into_iter()
-        .map(Certificate)
-        .collect();
-    Ok(certs)
+    ssl_context
 }
 
-pub fn load_private_key(filename: &str) -> io::Result<PrivateKey> {
-    let keyfile = File::open(filename)?;
+async fn load_certs(path: &str) -> io::Result<Vec<Certificate>> {
+    let certfile = File::open(path)?;
+    let mut reader = BufReader::new(certfile);
+    let certs = certs(&mut reader)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to load certificate"))?;
+    Ok(certs.into_iter().map(Certificate).collect())
+}
+
+async fn load_private_key(path: &str) -> io::Result<PrivateKey> {
+    let keyfile = File::open(path)?;
     let mut reader = BufReader::new(keyfile);
     let keys = pkcs8_private_keys(&mut reader)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))?;
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to load private key"))?;
     Ok(PrivateKey(keys[0].clone()))
 }
 
-pub fn configure_tls(certs: Vec<Certificate>, key: PrivateKey) -> io::Result<ServerConfig> {
-    let config = ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert/key"))?;
-    Ok(config)
+fn create_certified_key(certs: Vec<Certificate>, key: PrivateKey) -> CertifiedKey {
+    let signing_key = RsaSigningKey::new(&key).unwrap();
+    CertifiedKey::new(certs, Arc::new(signing_key))
 }

@@ -25,7 +25,7 @@ pub struct HttpRoute {
 pub struct HttpsRoute {
     pub source: String,
     pub target: String,
-    pub ssl_context: TlsAcceptor
+    pub ssl_path: SslPath
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]

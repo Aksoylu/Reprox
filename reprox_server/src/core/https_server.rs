@@ -1,16 +1,11 @@
 use hyper::client::HttpConnector;
-use hyper::{
-    header,
-    server::conn::Http,
-    service::{make_service_fn, service_fn},
-    Body, Client, Request, Response, Server,
-};
+use hyper::{header, server::conn::Http, service::service_fn, Body, Client, Request, Response};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_rustls::TlsAcceptor;
 
 use crate::utils::network_utility::parse_ip_address;
-use crate::utils::tls_utility::{configure_tls, load_certs, load_private_key};
+use crate::utils::tls_utility::create_ssl_context;
 
 use super::models::HttpsRoute;
 
@@ -36,76 +31,59 @@ impl HttpsServer {
     }
 
     pub async fn start(&self) {
-        let http_server = Arc::new(Mutex::new(self.clone()));
-
-        let make_svc = make_service_fn(|_conn| {
-            let http_server = Arc::clone(&http_server);
-
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |req| {
-                    let http_server = Arc::clone(&http_server);
-                    async move {
-                        let data = http_server.lock().await;
-
-                        match data.handle_request(req).await {
-                            Ok(response) => Ok::<_, hyper::Error>(response),
-                            Err(_) => Ok::<_, hyper::Error>(Response::new(Body::from(
-                                "Error processing request",
-                            ))),
-                        }
-                    }
-                }))
-            }
-        });
-
-        // Load the certificates and keys
-        let certs = load_certs("cert.pem").unwrap();
-        let key = load_private_key("key.pem").unwrap();
-        let tls_cfg = configure_tls(certs, key).unwrap();
-        let tls_acceptor = TlsAcceptor::from(Arc::new(tls_cfg));
-
-        if let Err(e) = Server::bind(&self.socket).serve(make_svc).await {
-            eprintln!("Server error: {}", e);
-            return;
-        }
+        let https_server: Arc<Mutex<HttpsServer>> = Arc::new(Mutex::new(self.clone()));
+        let ssl_context: TlsAcceptor = create_ssl_context(self.routes.clone()).await;
 
         println!("Reprox Server started on {:?}", &self.socket);
+        let listener: TcpListener = TcpListener::bind(&self.socket).await.unwrap();
 
-        let listener = TcpListener::bind(&self.socket).await.unwrap();
-
+        /* LifeCycle */
         loop {
             let (stream, _) = listener.accept().await.unwrap();
-            let tls_acceptor = tls_acceptor.clone();
-            let http_server = Arc::clone(&http_server);
-
+            let tls_acceptor: TlsAcceptor = ssl_context.clone();
+            let https_server: Arc<Mutex<HttpsServer>> = Arc::clone(&https_server);
+            let self_clone = self.clone();
             tokio::spawn(async move {
-                let stream = match tls_acceptor.accept(stream).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        eprintln!("TLS accept error: {:?}", e);
-                        return;
-                    }
-                };
-
-                let service = service_fn(move |req: Request<Body>| {
-                    let http_server = Arc::clone(&http_server);
-                    async move {
-                        let data = http_server.lock().await;
-                        match data.handle_request(req).await {
-                            Ok(response) => Ok::<_, hyper::Error>(response),
-                            Err(_) => Ok::<_, hyper::Error>(Response::new(Body::from(
-                                "Error processing request",
-                            ))),
-                        }
-                    }
-                });
-
-                let http = Http::new();
-                if let Err(e) = http.serve_connection(stream, service).await {
-                    eprintln!("Server error: {}", e);
-                }
+                self_clone
+                    .lifecycle(tls_acceptor, stream, https_server)
+                    .await;
             });
         }
+    }
+
+    async fn lifecycle(
+        &self,
+        tls_acceptor: TlsAcceptor,
+        stream: tokio::net::TcpStream,
+        https_server: Arc<Mutex<HttpsServer>>,
+    ) {
+        tokio::spawn(async move {
+            let stream = match tls_acceptor.accept(stream).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    eprintln!("TLS accept error: {:?}", e);
+                    return;
+                }
+            };
+
+            let service = service_fn(move |req: Request<Body>| {
+                let https_server: Arc<Mutex<HttpsServer>> = Arc::clone(&https_server);
+                async move {
+                    let data: tokio::sync::MutexGuard<HttpsServer> = https_server.lock().await;
+                    match data.handle_request(req).await {
+                        Ok(response) => Ok::<_, hyper::Error>(response),
+                        Err(_) => Ok::<_, hyper::Error>(Response::new(Body::from(
+                            "Error processing request",
+                        ))),
+                    }
+                }
+            });
+
+            let http = Http::new();
+            if let Err(e) = http.serve_connection(stream, service).await {
+                eprintln!("Server error: {}", e);
+            }
+        });
     }
 
     async fn handle_request(&self, req: Request<Body>) -> Result<Response<Body>, hyper::Error> {

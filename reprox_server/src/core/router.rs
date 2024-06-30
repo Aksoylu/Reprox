@@ -25,16 +25,17 @@ impl Router {
                     source: each_route.source.clone(),
                     target: each_route.target.clone()
                 };
-                let _ = http_route_table.insert(each_route.source.clone(), new_http_route.clone());
+                http_route_table.insert(each_route.source.clone(), new_http_route.clone());
             }
             else if protocol_name == "https"
             {
                 let new_https_route = HttpsRoute {
                     source: each_route.source.clone(),
                     target: each_route.target.clone(),
-                    ssl_context: create_ssl_context(each_route.ssl),
+                    ssl_path: each_route.ssl.clone().unwrap_or_default(),
                 };
-                let _ = https_route_table.insert(each_route.source.clone(), new_https_route.clone());
+
+                https_route_table.insert(each_route.source.clone(), new_https_route.clone());
             }
             else 
             {

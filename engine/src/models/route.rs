@@ -1,26 +1,14 @@
-use rustls::{Certificate, PrivateKey};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Clone)]
-
-pub struct Ssl {
-    pub cert: Vec<Certificate>,
-    pub private_key: PrivateKey,
-}
+use super::ssl_path::SslPath;
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
-pub struct SslPath {
-    pub cert: String,
-    pub private_key: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct HttpRoute {
     pub source: String,
     pub target: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
 pub struct HttpsRoute {
     pub source: String,
     pub target: String,
@@ -32,5 +20,6 @@ pub struct JsonRoute {
     pub protocol: String,
     pub source: String,
     pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ssl: Option<SslPath>,
 }

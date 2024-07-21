@@ -1,52 +1,70 @@
-mod config;
+mod constants;
 mod core;
+mod models;
 mod rpc_service;
-mod settings;
+mod runtime;
 mod utils;
 
-use config::Config;
-use core::{
-    http_server::HttpServer,
-    https_server::HttpsServer,
-    router::Router,
-};
-use rpc_service::rpc_server::RPCServer;
+use core::{http_server::HttpServer, https_server::HttpsServer};
+use std::sync::Arc;
+use std::sync::Mutex;
 
+use tokio::sync::{ watch};
+use rpc_service::rpc_server::RPCServer;
+use runtime::Runtime;
+    // TODO: make runtime dynamically changable with jrpc
+    // TODO: make runtime uses constant paths. If not exist, create folders and files by using defaults
 #[tokio::main]
 async fn main() {
-    let config: Config = Config::load();
-    let routes = Router::load();
+    let runtime = Arc::new(Mutex::new(Runtime::init()));
 
-    let http_server = HttpServer::singleton(
-        config.http_server.ip_address.clone(),
-        config.http_server.port,
-        routes.get_http_routes(),
-    );
+    let http_runtime = runtime.clone();
+    let http_server = {
+        let rt = http_runtime.lock().unwrap();
+
+        HttpServer::singleton(
+            rt.config.http_server.ip_address.clone(),
+            rt.config.http_server.port,
+            rt.router.get_http_routes()
+        )
+    };
 
     tokio::spawn(async move {
         http_server.start().await;
     });
 
-    let https_server = HttpsServer::singleton(
-        config.https_server.ip_address.clone(),
-        config.https_server.port,
-        routes.get_https_routes(),
-    );
+    let https_runtime = runtime.clone();
+    let https_server = {
+        let rt = https_runtime.lock().unwrap();
+        HttpsServer::singleton(
+            rt.config.https_server.ip_address.clone(),
+            rt.config.https_server.port,
+            rt.router.get_https_routes(),
+        )
+    };
 
     tokio::spawn(async move {
         https_server.start().await;
     });
 
-    if config.rpc_server.is_some(){
-        let rpc_server_config = config.rpc_server.unwrap();
+    let jsonrpc_runtime = runtime.clone();
+    let jsonrpc_server = {
+        let rt = jsonrpc_runtime.lock().unwrap();
+        RPCServer::singleton(
+            rt.config.rpc_server.ip_address.clone(),
+            rt.config.rpc_server.port,
+            rt.config.rpc_server.private_key.clone(),
+            runtime.clone()
+        )
+    }.await;
 
-        let jsonrpc_server = RPCServer::singleton(
-            rpc_server_config.ip_address,
-            rpc_server_config.port,
-            rpc_server_config.private_key,
-        );
+    tokio::spawn(async move {
         jsonrpc_server.start().await;
-    }
+    });
 
- 
+     
+    // Keep the main task running (adjust as necessary for your application)
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+    }
 }

@@ -8,8 +8,7 @@ use tokio::sync::Mutex;
 
 use hyper::client::HttpConnector;
 
-use super::models::HttpRoute;
-use crate::utils::network_utility::parse_ip_address;
+use crate::{models::route::HttpRoute, utils::network_utility::parse_ip_address};
 
 #[derive(Debug, Clone)]
 pub struct HttpServer {
@@ -62,8 +61,9 @@ impl HttpServer {
             .map_or_else(|| "/".to_string(), |host_value| host_value.to_string());
 
         if !self.routes.contains_key(&request_host) {
-            let response =
-                Response::new(Body::from("Requested domain has not registered on Vanguard"));
+            let response = Response::new(Body::from(
+                "Requested domain has not registered on Vanguard",
+            ));
             return Ok(response);
         }
 
@@ -77,8 +77,9 @@ impl HttpServer {
         let current_route = self.routes.get(&request_host).unwrap();
 
         if String::is_empty(&current_route.source) {
-            let response =
-                Response::new(Body::from("Requested domain is not registered on Vanguard Engine."));
+            let response = Response::new(Body::from(
+                "Requested domain is not registered on Vanguard Engine.",
+            ));
             return Ok(response);
         }
 

@@ -22,6 +22,7 @@ hyper-rustls = "0.22"
 tokio-rustls = "0.23"
 rustls = "0.20"
 rustls-pemfile = "0.2"
+dirs = "4.0.0"
 
 [profile.dev]
 panic = "abort"

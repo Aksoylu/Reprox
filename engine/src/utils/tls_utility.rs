@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::sync::Arc;
 
-use crate::core::models::HttpsRoute;
+use crate::models::route::HttpsRoute;
 
 pub async fn create_ssl_context(routes: HashMap<std::string::String, HttpsRoute>) -> TlsAcceptor {
     let mut sni_resolver = ResolvesServerCertUsingSni::new();
